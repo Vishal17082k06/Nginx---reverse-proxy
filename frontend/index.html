@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nginx Load Balancer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 40px 20px;
+      min-height: 100vh;
+    }
+
+    .wrap { max-width: 780px; margin: 0 auto; }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding-bottom: 20px;
+      border-bottom: 1px solid #21262d;
+      margin-bottom: 28px;
+    }
+    header h1 { font-size: 17px; font-weight: 600; }
+    header p { font-size: 13px; color: #8b949e; margin-top: 4px; }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #8b949e;
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #484f58;
+    }
+    .dot.ok     { background: #3fb950; }
+    .dot.busy   { background: #d29922; }
+    .dot.err    { background: #f85149; }
+
+    /* feature pills */
+    .pills {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    .pill {
+      font-size: 11px;
+      color: #8b949e;
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 20px;
+      padding: 3px 10px;
+    }
+
+    /* rate limit warning */
+    .rate-warn {
+      display: none;
+      background: #2d1b00;
+      border: 1px solid #6e3a00;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: #d29922;
+      margin-bottom: 16px;
+    }
+
+    /* stat cards */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .stat {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .stat-label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-val   { font-size: 26px; font-weight: 700; margin-top: 6px; }
+    .stat-sub   { font-size: 11px; color: #8b949e; margin-top: 4px; font-family: monospace; }
+    .blue  { color: #79c0ff; }
+    .green { color: #56d364; }
+
+    .dist-nums { display: flex; gap: 16px; margin-top: 6px; }
+    .dist-nums > div { flex: 1; }
+    .dist-nums .tiny { font-size: 11px; margin-bottom: 2px; }
+    .bar-track { height: 5px; background: #21262d; border-radius: 3px; overflow: hidden; margin-top: 10px; }
+    .bar-fill  { height: 100%; background: #1f6feb; border-radius: 3px; width: 50%; transition: width 0.4s; }
+
+    /* response card */
+    .card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 18px 20px;
+      margin-bottom: 14px;
+    }
+    .card-title { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+
+    .response-area {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 6px;
+      padding: 14px;
+      min-height: 70px;
+      display: flex;
+      align-items: center;
+    }
+    .response-area.inst1 { border-left: 3px solid #1f6feb; }
+    .response-area.inst2 { border-left: 3px solid #3fb950; }
+
+    .resp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; width: 100%; }
+    .resp-grid .span2 { grid-column: 1 / -1; }
+    .resp-grid label { display: block; font-size: 11px; color: #8b949e; margin-bottom: 3px; }
+    .resp-grid span  { font-size: 13px; }
+    .mono { font-family: monospace; font-size: 11px; color: #8b949e; word-break: break-all; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .badge.inst1 { background: #1c3461; color: #79c0ff; }
+    .badge.inst2 { background: #1a3828; color: #56d364; }
+
+    .placeholder { color: #484f58; font-size: 13px; }
+
+    button.send {
+      display: block;
+      width: 100%;
+      margin-top: 12px;
+      padding: 11px;
+      background: #238636;
+      color: #fff;
+      border: 1px solid #2ea043;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.send:hover:not(:disabled) { background: #2ea043; }
+    button.send:disabled { opacity: 0.5; cursor: default; }
+
+    /* nginx headers */
+    .hgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .hrow {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 5px;
+      padding: 9px 11px;
+    }
+    .hkey { font-size: 10px; font-family: monospace; color: #8b949e; margin-bottom: 3px; }
+    .hval { font-size: 12px; font-family: monospace; word-break: break-all; }
+    .hval.dim   { color: #484f58; }
+    .hval.blue  { color: #79c0ff; }
+    .hval.green { color: #56d364; }
+
+    /* log */
+    .log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .clear { background: none; border: none; color: #8b949e; font-size: 12px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+    .clear:hover { background: #21262d; color: #e6edf3; }
+
+    ul.log { list-style: none; max-height: 220px; overflow-y: auto; }
+    ul.log::-webkit-scrollbar { width: 4px; }
+    ul.log::-webkit-scrollbar-thumb { background: #30363d; }
+
+    .log-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      border-radius: 5px;
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+    .log-row.inst1 { background: #0d1f3c; border: 1px solid #1c3461; }
+    .log-row.inst2 { background: #0d2115; border: 1px solid #1a3828; }
+    .log-left  { display: flex; gap: 10px; align-items: center; }
+    .log-right { text-align: right; color: #8b949e; font-size: 11px; }
+
+    .empty { color: #484f58; font-size: 13px; text-align: center; padding: 20px 0; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>Nginx Load Balancer</h1>
+      <p>Round-robin with Docker Compose + FastAPI</p>
+    </div>
+    <div class="status">
+      <div class="dot" id="dot"></div>
+      <span id="status">Idle</span>
+    </div>
+  </header>
+
+  <div class="pills">
+    <span class="pill">Round-Robin</span>
+    <span class="pill">Rate Limiting — 10 req/s</span>
+    <span class="pill">Gzip Compression</span>
+    <span class="pill">Upstream Keepalive</span>
+    <span class="pill">Request Tracing</span>
+  </div>
+
+  <div class="rate-warn" id="rate-warn">
+    ⚠ Rate limit hit (HTTP 429) — Nginx is throttling. Wait a moment and try again.
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-label">Total Requests</div>
+      <div class="stat-val" id="total">0</div>
+      <div class="stat-sub">since page load</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Last Server</div>
+      <div class="stat-val" id="last" style="font-size:17px; margin-top:8px;">—</div>
+      <div class="stat-sub" id="last-cid">waiting...</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Hit Distribution</div>
+      <div class="dist-nums">
+        <div>
+          <div class="tiny blue">Instance 1</div>
+          <div class="stat-val blue" id="c1" style="font-size:22px;">0</div>
+        </div>
+        <div>
+          <div class="tiny green">Instance 2</div>
+          <div class="stat-val green" id="c2" style="font-size:22px;">0</div>
+        </div>
+      </div>
+      <div class="bar-track"><div class="bar-fill" id="bar"></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Last Response</div>
+    <div class="response-area" id="resp" style="justify-content:center;">
+      <span class="placeholder">No response yet — click Send Request</span>
+    </div>
+    <button class="send" id="btn" onclick="send()">Send Request →</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Headers Added by Nginx</div>
+    <div class="hgrid">
+      <div class="hrow"><div class="hkey">X-Request-ID</div><div class="hval dim" id="h-rid">—</div></div>
+      <div class="hrow"><div class="hkey">X-Upstream</div><div class="hval dim" id="h-up">—</div></div>
+      <div class="hrow"><div class="hkey">X-Response-Time</div><div class="hval dim" id="h-rt">—</div></div>
+      <div class="hrow"><div class="hkey">X-Load-Balancer</div><div class="hval dim" id="h-lb">—</div></div>
+      <div class="hrow"><div class="hkey">X-Real-IP (seen by backend)</div><div class="hval dim" id="h-ip">—</div></div>
+      <div class="hrow"><div class="hkey">X-Forwarded-For (seen by backend)</div><div class="hval dim" id="h-ff">—</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="log-header">
+      <div class="card-title" style="margin:0;">Request Log</div>
+      <button class="clear" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="empty" id="empty">No requests yet.</div>
+    <ul class="log" id="log"></ul>
+  </div>
+
+</div>
+
+<script>
+  let total = 0, c1 = 0, c2 = 0, n = 0;
+
+  function setStatus(text, cls) {
+    document.getElementById('status').textContent = text;
+    document.getElementById('dot').className = 'dot ' + cls;
+  }
+
+  function setHeader(id, val, cls) {
+    const el = document.getElementById(id);
+    const empty = !val || val === '-';
+    el.textContent = empty ? '—' : val;
+    el.className = 'hval ' + (empty ? 'dim' : (cls || ''));
+  }
+
+  async function send() {
+    const btn = document.getElementById('btn');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    setStatus('Sending', 'busy');
+    document.getElementById('rate-warn').style.display = 'none';
+
+    const t0 = performance.now();
+    n++;
+    const num = n;
+
+    try {
+      const res = await fetch('/api/', { cache: 'no-store' });
+      const ms = Math.round(performance.now() - t0);
+
+      if (res.status === 429) {
+        document.getElementById('rate-warn').style.display = 'block';
+        setStatus('Rate limited', 'err');
+        return;
+      }
+
+      const data = await res.json();
+      const ph = data.proxy_headers || {};
+      const inst = data.instance_id || 'unknown';
+      const cid  = data.container_id || '';
+      const is1  = inst.includes('1');
+      const cls  = is1 ? 'inst1' : 'inst2';
+
+      // stats
+      total++;
+      if (is1) c1++; else c2++;
+      document.getElementById('total').textContent = total;
+      document.getElementById('c1').textContent = c1;
+      document.getElementById('c2').textContent = c2;
+
+      const t = c1 + c2;
+      document.getElementById('bar').style.width = (t ? Math.round(c1/t*100) : 50) + '%';
+
+      const lastEl = document.getElementById('last');
+      lastEl.textContent = inst;
+      lastEl.className = 'stat-val ' + (is1 ? 'blue' : 'green');
+      lastEl.style.fontSize = '17px';
+      lastEl.style.marginTop = '8px';
+      document.getElementById('last-cid').textContent = cid.slice(0, 12);
+
+      // response card
+      const box = document.getElementById('resp');
+      box.className = 'response-area ' + cls;
+      box.style.justifyContent = '';
+      box.innerHTML = `
+        <div class="resp-grid">
+          <div><label>Server ID</label><span><span class="badge ${cls}">${inst}</span></span></div>
+          <div><label>Container ID</label><span class="mono">${cid}</span></div>
+          <div class="span2"><label>Message</label><span>${data.message}</span></div>
+        </div>`;
+
+      // nginx headers
+      const nginxRt = res.headers.get('x-response-time');
+      const rtDisplay = (nginxRt && nginxRt !== '-')
+        ? `${Math.round(parseFloat(nginxRt) * 1000)} ms (nginx: ${nginxRt}s)`
+        : `${ms} ms (client-side)`;
+
+      setHeader('h-rid', res.headers.get('x-request-id'), 'blue');
+      setHeader('h-up',  res.headers.get('x-upstream'),   'green');
+      setHeader('h-rt',  rtDisplay);
+      setHeader('h-lb',  res.headers.get('x-load-balancer'));
+      setHeader('h-ip',  ph['x-real-ip']);
+      setHeader('h-ff',  ph['x-forwarded-for']);
+
+      // log
+      const li = document.createElement('li');
+      li.className = 'log-row ' + cls;
+      li.innerHTML = `
+        <div class="log-left">
+          <strong>${inst}</strong>
+          <span style="font-family:monospace;color:#8b949e;font-size:10px;">${cid.slice(0,12)}</span>
+          <span style="color:#484f58;font-size:10px;">${res.headers.get('x-upstream') || ''}</span>
+        </div>
+        <div class="log-right">
+          <div>#${num}</div>
+          <div>${new Date().toLocaleTimeString()}</div>
+        </div>`;
+      document.getElementById('log').prepend(li);
+      document.getElementById('empty').style.display = 'none';
+
+      setStatus('OK', 'ok');
+
+    } catch (e) {
+      const box = document.getElementById('resp');
+      box.className = 'response-area';
+      box.style.justifyContent = 'center';
+      box.innerHTML = `<span style="color:#f85149;">Error: ${e.message}</span>`;
+      setStatus('Error', 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Send Request →';
+    }
+  }
+
+  function clearLog() {
+    document.getElementById('log').innerHTML = '';
+    document.getElementById('empty').style.display = '';
+  }
+</script>
+</body>
+</html>
